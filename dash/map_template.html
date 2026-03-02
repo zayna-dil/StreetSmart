@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>LumiTracker — Sugar Land</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://leaflet.github.io/Leaflet.heat/dist/leaflet-heat.js"></script>
+<style>
+:root {
+  --bg:       #080c14;
+  --surface:  #0e1520;
+  --surface2: #141d2e;
+  --border:   #1c2a40;
+  --muted:    #3a4a60;
+  --text:     #c8d8e8;
+  --dim:      #5a7090;
+  --failed:   #ff3a3a;
+  --atrisk:   #f5a300;
+  --healthy:  #22cc66;
+  --cw:       #00d4ff;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+  --sb-width: 340px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { width:100%; height:100%; margin:0; padding:0; overflow:hidden; background:var(--bg); }
+#map { position:absolute; inset:0; right:var(--sb-width); }
+
+/* ── SIDEBAR ── */
+#sidebar {
+  position:fixed; top:0; right:0;
+  width:var(--sb-width); height:100%;
+  background:var(--surface);
+  border-left:1px solid var(--border);
+  display:flex; flex-direction:column;
+  font-family:var(--mono);
+  font-size:11px; color:var(--text);
+  z-index:9999;
+  box-shadow: -8px 0 40px rgba(0,0,0,.6);
+}
+
+/* header */
+#sb-head {
+  padding:14px 16px 12px;
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+#sb-head .wordmark {
+  font-size:10px; letter-spacing:.2em; text-transform:uppercase;
+  color:var(--dim); margin-bottom:4px; font-weight:500;
+}
+#sb-head h1 {
+  font-size:15px; font-weight:600; color:#fff;
+  margin:0 0 2px; letter-spacing:.02em;
+}
+#sb-head .sub { font-size:10px; color:var(--dim); }
+
+/* stat row */
+#stat-row {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:1px; background:var(--border);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.stat-cell {
+  background:var(--surface); padding:10px 12px; text-align:center;
+}
+.stat-num {
+  display:block; font-size:20px; font-weight:600;
+  font-family:var(--mono); letter-spacing:-.02em;
+  line-height:1;
+}
+.stat-lbl { display:block; font-size:9px; color:var(--dim); margin-top:3px; text-transform:uppercase; letter-spacing:.1em; }
+.s-failed  { color:var(--failed); }
+.s-atrisk  { color:var(--atrisk); }
+.s-healthy { color:var(--healthy); }
+
+/* layer toggles */
+#layer-bar {
+  padding:10px 12px; border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.layer-lbl { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; margin-bottom:7px; }
+#layer-btns { display:flex; gap:5px; flex-wrap:wrap; }
+.l-btn {
+  flex:1; min-width:60px;
+  padding:5px 0; border-radius:3px; border:1px solid transparent;
+  font-family:var(--mono); font-size:10px; cursor:pointer;
+  transition: opacity .15s, border-color .15s;
+  opacity:.35; display:flex; align-items:center; justify-content:center; gap:4px;
+}
+.l-btn.active { opacity:1; border-color:currentColor; }
+.l-btn.lb-failed  { color:var(--failed);  background:rgba(255,58,58,.08); }
+.l-btn.lb-atrisk  { color:var(--atrisk);  background:rgba(245,163,0,.08); }
+.l-btn.lb-healthy { color:var(--healthy); background:rgba(34,204,102,.08); }
+.l-btn.lb-cw      { color:var(--cw);      background:rgba(0,212,255,.08); }
+
+/* view mode pill */
+#view-bar {
+  padding:8px 12px; border-bottom:1px solid var(--border);
+  flex-shrink:0; display:flex; align-items:center; gap:8px;
+}
+.view-lbl { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+#view-pills { display:flex; background:var(--bg); border-radius:4px; border:1px solid var(--border); overflow:hidden; }
+.vpill {
+  padding:4px 10px; font-size:10px; font-family:var(--mono);
+  cursor:pointer; color:var(--dim); border:none; background:transparent; transition:all .15s;
+}
+.vpill.active { background:var(--surface2); color:var(--text); }
+
+/* scrollable content */
+#sb-content {
+  flex:1; overflow-y:auto; overflow-x:hidden;
+}
+#sb-content::-webkit-scrollbar { width:4px; }
+#sb-content::-webkit-scrollbar-track { background:transparent; }
+#sb-content::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+
+/* fixture table */
+#fixture-section {
+  padding:12px 14px 8px;
+  border-bottom:1px solid var(--border);
+}
+.section-hd {
+  font-size:9px; text-transform:uppercase; letter-spacing:.12em;
+  color:var(--dim); margin-bottom:8px;
+}
+.fx-row {
+  padding:7px 0 5px; border-bottom:1px solid var(--border);
+  cursor:pointer; transition:background .1s;
+}
+.fx-row:hover { background:var(--surface2); }
+.fx-label {
+  display:flex; justify-content:space-between; align-items:baseline;
+  margin-bottom:5px;
+}
+.fx-name { font-size:10px; color:var(--text); font-weight:500; }
+.fx-counts { font-size:9px; color:var(--dim); }
+.fx-bar-track {
+  height:5px; background:var(--border); border-radius:3px;
+  overflow:hidden; display:flex;
+}
+.fx-bar-seg { height:100%; transition:width .3s ease; }
+
+/* accordion sections */
+.acc-section { border-bottom:1px solid var(--border); }
+.acc-hd {
+  width:100%; padding:9px 14px; background:transparent; border:none;
+  display:flex; align-items:center; gap:8px; cursor:pointer;
+  font-family:var(--mono); font-size:11px; color:var(--text);
+  text-align:left; transition:background .12s;
+}
+.acc-hd:hover { background:var(--surface2); }
+.acc-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+.acc-cnt { margin-left:auto; color:var(--dim); font-size:10px; }
+.acc-arr { color:var(--dim); font-size:9px; margin-left:4px; }
+.acc-body { display:none; }
+.acc-hd.open + .acc-body { display:block; }
+
+/* search / filter bar */
+.search-bar {
+  display:flex; gap:5px; padding:7px 12px;
+  border-bottom:1px solid var(--border);
+  background:var(--surface);
+  position:sticky; top:0; z-index:10;
+}
+.search-bar input, .search-bar select {
+  background:var(--bg); color:var(--text);
+  border:1px solid var(--border); border-radius:3px;
+  padding:4px 7px; font-size:10px; font-family:var(--mono);
+  flex:1; outline:none;
+}
+.search-bar input:focus, .search-bar select:focus { border-color:var(--muted); }
+
+/* pole rows */
+.prow {
+  display:flex; align-items:center; gap:6px;
+  padding:6px 12px; border-bottom:1px solid var(--border);
+  cursor:pointer; transition:background .1s;
+}
+.prow:hover { background:var(--surface2); }
+.prow-badge {
+  font-size:8px; font-weight:600; padding:2px 5px;
+  border-radius:2px; white-space:nowrap; flex-shrink:0; text-transform:uppercase;
+}
+.prow-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text); }
+.prow-lux { color:var(--dim); font-size:10px; white-space:nowrap; }
+.prow-pct {
+  font-size:10px; font-weight:500; white-space:nowrap;
+  padding:1px 4px; border-radius:2px;
+}
+
+/* lux % bar inside popup */
+.lux-bar-wrap { margin:8px 0 4px; }
+.lux-bar-label { display:flex; justify-content:space-between; margin-bottom:4px; font-size:10px; }
+.lux-bar-bg { width:100%; height:6px; background:#1a2535; border-radius:3px; overflow:hidden; }
+.lux-bar-fill { height:100%; border-radius:3px; transition:width .4s ease; }
+
+/* selected pole panel */
+#pole-detail {
+  display:none;
+  position:fixed; bottom:20px; left:20px;
+  width:260px;
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:6px;
+  padding:14px 16px;
+  font-family:var(--mono);
+  font-size:11px;
+  color:var(--text);
+  z-index:10000;
+  box-shadow:0 8px 40px rgba(0,0,0,.7);
+  animation: slideUp .2s ease;
+}
+@keyframes slideUp {
+  from { transform:translateY(8px); opacity:0; }
+  to   { transform:translateY(0);   opacity:1; }
+}
+#pd-close {
+  position:absolute; top:8px; right:10px;
+  background:none; border:none; color:var(--dim);
+  cursor:pointer; font-size:14px; line-height:1;
+}
+#pd-close:hover { color:var(--text); }
+.pd-header { margin-bottom:10px; }
+.pd-id { font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+.pd-fixture { font-size:13px; font-weight:600; color:#fff; margin:2px 0; }
+.pd-status { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.08em; }
+.pd-row { display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-top:1px solid var(--border); }
+.pd-key { color:var(--dim); }
+.pd-val { color:var(--text); font-weight:500; }
+.pd-coords { font-size:10px; color:var(--dim); margin-top:6px; }
+
+/* export button */
+#export-btn {
+  display:block; width:calc(100% - 24px); margin:10px 12px;
+  padding:8px; background:rgba(34,204,102,.1);
+  border:1px solid rgba(34,204,102,.3);
+  border-radius:4px; color:var(--healthy);
+  font-family:var(--mono); font-size:11px;
+  cursor:pointer; text-align:center; transition:all .15s;
+  letter-spacing:.05em;
+}
+#export-btn:hover { background:rgba(34,204,102,.2); border-color:var(--healthy); }
+
+/* cluster customization */
+.marker-cluster-small,
+.marker-cluster-medium,
+.marker-cluster-large { background:transparent !important; }
+.marker-cluster-small div,
+.marker-cluster-medium div,
+.marker-cluster-large div {
+  background:rgba(14,21,32,.85) !important;
+  border:1.5px solid var(--border) !important;
+  color:var(--text) !important;
+  font-family:var(--mono) !important;
+  font-size:10px !important;
+}
+
+/* Leaflet popup override */
+.leaflet-popup-content-wrapper {
+  background:var(--surface); color:var(--text);
+  border:1px solid var(--border); border-radius:5px;
+  box-shadow:0 4px 20px rgba(0,0,0,.6);
+  font-family:var(--mono); font-size:11px;
+}
+.leaflet-popup-tip { background:var(--surface); }
+.leaflet-popup-content { margin:12px 14px; }
+
+/* toast */
+#toast {
+  position:fixed; bottom:20px; right:360px;
+  background:var(--surface2); border:1px solid var(--border);
+  border-radius:4px; padding:8px 14px;
+  font-family:var(--mono); font-size:11px; color:var(--text);
+  opacity:0; transition:opacity .3s; pointer-events:none; z-index:20000;
+}
+#toast.show { opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- ── SIDEBAR ─────────────────────────────────────────────── -->
+<div id="sidebar">
+  <div id="sb-head">
+    <div class="wordmark">LumiTracker · Sugar Land TX</div>
+    <h1>Street Light Health</h1>
+    <div class="sub" id="sb-sub">Loading…</div>
+  </div>
+
+  <div id="stat-row">
+    <div class="stat-cell">
+      <span class="stat-num s-failed"  id="cnt-f">—</span>
+      <span class="stat-lbl">Failed</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-num s-atrisk"  id="cnt-a">—</span>
+      <span class="stat-lbl">At-Risk</span>
+    </div>
+    <div class="stat-cell">
+      <span class="stat-num s-healthy" id="cnt-h">—</span>
+      <span class="stat-lbl">Healthy</span>
+    </div>
+  </div>
+
+  <div id="layer-bar">
+    <div class="layer-lbl">Show on map</div>
+    <div id="layer-btns">
+      <button class="l-btn lb-failed  active" onclick="toggleLayer('failed')" >● Failed</button>
+      <button class="l-btn lb-atrisk  active"  onclick="toggleLayer('atrisk')" >● At-Risk</button>
+      <button class="l-btn lb-healthy active"  onclick="toggleLayer('healthy')">● Healthy</button>
+      <button class="l-btn lb-cw"             onclick="toggleLayer('cw')"     >◆ Crosswalks</button>
+    </div>
+  </div>
+
+
+<div id="cw-legend" style="display:none;padding:8px 12px 6px;border-bottom:1px solid var(--border);font-size:10px;color:var(--dim);line-height:1.8">
+  <div style="margin-bottom:3px;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim)">Crosswalk key</div>
+  <div><svg width="11" height="11" viewBox="0 0 14 14" style="vertical-align:middle;margin-right:4px"><polygon points="7,1 13,13 1,13" fill="#aaa"/></svg><b style="color:var(--text)">Uncontrolled</b> — no signs, no signals</div>
+  <div><svg width="11" height="11" viewBox="0 0 14 14" style="vertical-align:middle;margin-right:4px"><polygon points="7,1 13,7 7,13 1,7" fill="#aaa"/></svg><b style="color:var(--text)">Midblock</b> — mid-road crossing</div>
+  <div><svg width="11" height="11" viewBox="0 0 14 14" style="vertical-align:middle;margin-right:4px"><circle cx="7" cy="7" r="5.5" fill="#aaa"/></svg><b style="color:var(--text)">Stop Controlled</b> — stop sign or signal</div>
+  <div style="margin-top:5px;padding-top:4px;border-top:1px solid var(--border)">
+    <span style="color:#ff6644">■</span> near dim/failed pole &nbsp;
+    <span style="color:#44aa66">■</span> adequately lit
+  </div>
+</div>
+  <div id="view-bar">
+    <span class="view-lbl">Render</span>
+    <div id="view-pills">
+      <button class="vpill active" onclick="setView('dots')"    id="vp-dots">Dots</button>
+      <button class="vpill"        onclick="setView('heat')"    id="vp-heat">Heat</button>
+      <button class="vpill"        onclick="setView('cluster')" id="vp-cluster">Cluster</button>
+    </div>
+  </div>
+
+  <div id="sb-content">
+
+    <!-- fixture breakdown -->
+    <div id="fixture-section">
+      <div class="section-hd">Fixture breakdown <span style="color:var(--muted);font-size:9px">— click to isolate</span></div>
+      <div id="fix-chart"></div>
+    </div>
+
+    <!-- failed accordion -->
+    <div class="acc-section">
+      <button class="acc-hd" onclick="toggleAcc(this)">
+        <span class="acc-dot" style="background:var(--failed)"></span>
+        Failed poles
+        <span class="acc-cnt" id="hd-failed-cnt"></span>
+        <span class="acc-arr">▼</span>
+      </button>
+      <div class="acc-body">
+        <div class="search-bar">
+          <select id="sel-failed" onchange="filterRows('failed-list',this.value)">
+            <option value="">All fixtures</option>
+          </select>
+          <input type="text" placeholder="Search ID or fixture…" oninput="searchRows('failed-list',this.value)">
+        </div>
+        <div id="failed-list"></div>
+      </div>
+    </div>
+
+    <!-- at-risk accordion -->
+    <div class="acc-section">
+      <button class="acc-hd" onclick="toggleAcc(this)">
+        <span class="acc-dot" style="background:var(--atrisk)"></span>
+        At-Risk poles
+        <span class="acc-cnt" id="hd-atrisk-cnt"></span>
+        <span class="acc-arr">▼</span>
+      </button>
+      <div class="acc-body">
+        <div class="search-bar">
+          <select id="sel-atrisk" onchange="filterRows('atrisk-list',this.value)">
+            <option value="">All fixtures</option>
+          </select>
+          <input type="text" placeholder="Search ID or fixture…" oninput="searchRows('atrisk-list',this.value)">
+        </div>
+        <div id="atrisk-list"></div>
+      </div>
+    </div>
+
+    <!-- export -->
+    <button id="export-btn" onclick="exportCSV()">
+      ↓ Export maintenance list (Failed + At-Risk)
+    </button>
+
+  </div><!-- /sb-content -->
+</div><!-- /sidebar -->
+
+<!-- ── POLE DETAIL PANEL ───────────────────────────────────── -->
+<div id="pole-detail">
+  <button id="pd-close" onclick="closeDetail()">✕</button>
+  <div class="pd-header">
+    <div class="pd-id"    id="pd-id"></div>
+    <div class="pd-fixture" id="pd-fixture"></div>
+    <div class="pd-status"  id="pd-status"></div>
+  </div>
+  <div class="lux-bar-wrap">
+    <div class="lux-bar-label">
+      <span style="color:var(--dim)">Luminosity</span>
+      <span id="pd-pct-label" style="font-weight:600"></span>
+    </div>
+    <div class="lux-bar-bg">
+      <div class="lux-bar-fill" id="pd-bar"></div>
+    </div>
+  </div>
+  <div class="pd-row"><span class="pd-key">Median peak</span><span class="pd-val" id="pd-lux-med"></span></div>
+  <div class="pd-row"><span class="pd-key">Max peak</span>   <span class="pd-val" id="pd-lux-max"></span></div>
+  <div class="pd-row"><span class="pd-key">Survey passes</span><span class="pd-val" id="pd-passes"></span></div>
+  <div class="pd-coords" id="pd-coords"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── DATA ─────────────────────────────────────────────────────────────────────
+// [lat, lon, status, color, fixture, lux_median, lux_max, lux_pct, pass_count, facility_id]
+var POLES = POLES;
+// [lat, lon, at_risk, type, nearest_pole_lux]
+var CROSSWALKS = CROSSWALKS;
+var FIXTURE_SUMMARY = FIXTURE;
+
+// ── MAP INIT ─────────────────────────────────────────────────────────────────
+var map = L.map('map', {
+  zoomControl:true,
+}).setView([29.63, -95.61], 13);
+
+// Crosswalk markers render above pole dots
+map.createPane('cwPane');
+map.getPane('cwPane').style.zIndex = 450;  // above markerPane (400) and overlayPane (400)
+
+// Try CartoDB dark tiles; fall back to OSM if blocked
+var tileUrl = 'https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png';
+var tileLayer = L.tileLayer(tileUrl, {
+  attribution: '&copy; <a href="https://carto.com">CartoDB</a>',
+  maxZoom: 19,
+  crossOrigin: true,
+});
+tileLayer.addTo(map);
+tileLayer.on('tileerror', function() {
+  // Fallback to Stadia dark tiles if CartoDB blocked
+  map.removeLayer(tileLayer);
+  L.tileLayer('https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; Stadia Maps',
+    maxZoom: 20,
+  }).addTo(map);
+});
+
+// ── STATUS COLORS (source of truth — never rely on p[3]) ─────────────────────
+var STATUS_COLOR = {
+  'failed':     '#ff4444',
+  'atrisk':     '#ffaa00',
+  'healthy':    '#44cc44',
+  'unsurveyed': '#444466',
+};
+function poleColor(p){ return STATUS_COLOR[p[2]] || '#444466'; }
+
+// ── STATE ────────────────────────────────────────────────────────────────────
+var activeLayers = new Set(['failed','atrisk','healthy']);
+var viewMode     = 'dots';    // dots | heat | cluster
+var poleMarkersMap = {};      // status -> array of L.circleMarker
+var heatLayers     = {};      // status -> L.heatLayer
+var clusterGroups  = {};      // status -> L.markerClusterGroup
+var cwLayer = L.layerGroup();
+
+// ── BUILD SIDEBAR STATS ──────────────────────────────────────────────────────
+(function buildStats() {
+  var nf=0, na=0, nh=0;
+  POLES.forEach(function(p){ if(p[2]==='failed')nf++; else if(p[2]==='atrisk')na++; else nh++; });
+  document.getElementById('cnt-f').textContent = nf.toLocaleString();
+  document.getElementById('cnt-a').textContent = na.toLocaleString();
+  document.getElementById('cnt-h').textContent = nh.toLocaleString();
+  document.getElementById('sb-sub').textContent = (nf+na+nh).toLocaleString() + ' poles surveyed · ' + CROSSWALKS.filter(function(c){return c[2];}).length + ' crosswalks at risk';
+
+  // fixture bar chart
+  var chartEl = document.getElementById('fix-chart');
+  Object.keys(FIXTURE_SUMMARY).sort().forEach(function(fx){
+    var d = FIXTURE_SUMMARY[fx];
+    var total = (d.failed + d.atrisk + d.healthy) || 1;
+    var failPct   = d.failed  / total * 100;
+    var atriskPct = d.atrisk  / total * 100;
+    var healthPct = d.healthy / total * 100;
+    chartEl.innerHTML +=
+      '<div class="fx-row" data-fixture="'+fx+'" onclick="filterMapByFixture(\''+fx+'\')">'+
+        '<div class="fx-label">'+
+          '<span class="fx-name">'+fx+'</span>'+
+          '<span class="fx-counts">'+
+            (d.failed ? '<span style="color:var(--failed)">'+d.failed+' fail</span> · ' : '')+
+            '<span style="color:var(--atrisk)">'+d.atrisk+' risk</span>'+
+          '</span>'+
+        '</div>'+
+        '<div class="fx-bar-track">'+
+          '<div class="fx-bar-seg" style="width:'+failPct.toFixed(1)+'%;background:var(--failed)"></div>'+
+          '<div class="fx-bar-seg" style="width:'+atriskPct.toFixed(1)+'%;background:var(--atrisk)"></div>'+
+          '<div class="fx-bar-seg" style="width:'+healthPct.toFixed(1)+'%;background:var(--healthy);opacity:.45"></div>'+
+        '</div>'+
+      '</div>';
+  });
+  // fixture select options
+  var fixtures = Object.keys(FIXTURE_SUMMARY).sort();
+  ['sel-failed','sel-atrisk'].forEach(function(id){
+    var sel = document.getElementById(id);
+    fixtures.forEach(function(f){ sel.innerHTML += '<option value="'+f+'">'+f+'</option>'; });
+  });
+
+  // header counts
+  document.getElementById('hd-failed-cnt').textContent = '(' + nf + ')';
+  document.getElementById('hd-atrisk-cnt').textContent = '(' + na + ')';
+
+})();
+
+// ── POLE LISTS ───────────────────────────────────────────────────────────────
+(function buildLists(){
+  var failedHtml = '', atriskHtml = '';
+  POLES.forEach(function(p, idx){
+    // p: [lat,lon,status,color,fixture,lux_med,lux_max,lux_pct,passes,facility_id]
+    var status=p[2], color=poleColor(p), fixture=p[4], med=p[5], lux_pct=p[7], fid=String(p[9]).replace(/\.0$/,'');
+    if(status !== 'failed' && status !== 'atrisk') return;
+
+    var pctColor = status==='failed' ? 'var(--failed)' : 'var(--atrisk)';
+    var badgeBg  = status==='failed' ? 'rgba(255,58,58,.15)' : 'rgba(245,163,0,.12)';
+    var badgeFg  = status==='failed' ? 'var(--failed)' : 'var(--atrisk)';
+
+    var cwNearby = p[10];  // bool — pole is near a crosswalk
+    var cwBadge = cwNearby ? '<span style="font-size:9px;margin-left:2px" title="Near crosswalk">🚶</span>' : '';
+    var row = '<div class="prow" data-fixture="'+fixture+'" data-fid="'+fid+'" data-cw="'+(cwNearby?'1':'0')+'" '+
+      'data-idx="'+idx+'" onclick="selectPole('+idx+')">' +
+      '<span class="prow-badge" style="background:'+badgeBg+';color:'+badgeFg+'">'+(status==='failed'?'FAIL':'RISK')+'</span>'+
+      '<span class="prow-name" title="'+fid+'">'+fid+cwBadge+'</span>'+
+      '<span class="prow-pct" style="color:'+pctColor+'">'+lux_pct+'%</span>'+
+      '<span class="prow-lux">'+med+' lx</span>'+
+      '</div>';
+
+    if(status==='failed') failedHtml += row;
+    else atriskHtml += row;
+  });
+  document.getElementById('failed-list').innerHTML = failedHtml;
+  document.getElementById('atrisk-list').innerHTML = atriskHtml;
+
+  // crosswalk list
+
+})();
+
+// ── CROSSWALKS ON MAP ─────────────────────────────────────────────────
+function makeCWIcon(type, atRisk) {
+  // Crosswalks are LARGER than poles and have a white halo so they
+  // punch through the pole dot layer and are clearly distinct
+  var fillColor   = atRisk ? '#ff5533' : '#33bb66';
+  var size = 20;  // noticeably bigger than pole dots (2-5px)
+
+  // White halo behind shape for contrast against any background
+  var halo, shape;
+  if (type === 'Uncontrolled') {
+    halo  = '<polygon points="10,0 20,18 0,18" fill="white" opacity="0.9"/>';
+    shape = '<polygon points="10,2 18,17 2,17" fill="'+fillColor+'"/>';
+  } else if (type === 'Midblock') {
+    halo  = '<polygon points="10,0 20,10 10,20 0,10" fill="white" opacity="0.9"/>';
+    shape = '<polygon points="10,2 18,10 10,18 2,10" fill="'+fillColor+'"/>';
+  } else {
+    // Stop Controlled — hollow ring so poles behind it are still visible
+    halo  = '<circle cx="10" cy="10" r="9" fill="white" opacity="0.9"/>';
+    shape = '<circle cx="10" cy="10" r="7" fill="none" stroke="'+fillColor+'" stroke-width="3"/>';
+  }
+
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="'+size+'" height="'+size+'" viewBox="0 0 20 20">'
+          + halo + shape + '</svg>';
+
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize:    [size, size],
+    iconAnchor:  [size/2, size/2],
+    popupAnchor: [0, -(size/2 + 4)],
+  });
+}
+
+CROSSWALKS.forEach(function(cw) {
+  var atRisk    = cw[2];
+  var type      = cw[3];
+  var riskLabel = atRisk ? '⚠ At-Risk' : '✅ Safe';
+  var riskColor = atRisk ? '#ff6644'   : '#44aa66';
+  var typeLabel = type === 'Uncontrolled' ? '▲ Uncontrolled' :
+                  type === 'Midblock'     ? '◆ Midblock'     : '● Stop Controlled';
+  var riskNote  = atRisk
+    ? '<div style="background:rgba(255,100,68,.12);border-left:2px solid #ff6644;padding:3px 6px;margin:5px 0;font-size:10px">Near dim/failed pole'+(cw[4] !== null ? ' ('+cw[4]+' lux)' : '')+'</div>'
+    : '';
+
+  var icon = makeCWIcon(type, atRisk);
+  var popup =
+    '<div style="font-family:var(--mono)">'+
+    '<div style="font-size:10px;color:'+riskColor+';font-weight:600;text-transform:uppercase;letter-spacing:.08em">'+riskLabel+'</div>'+
+    '<div style="font-size:13px;font-weight:600;color:#fff;margin:3px 0">'+typeLabel+'</div>'+
+    riskNote+
+    '<div style="font-size:9px;color:#5a7090;margin-top:4px">'+cw[0].toFixed(5)+', '+cw[1].toFixed(5)+'</div>'+
+    '</div>';
+
+  L.marker([cw[0], cw[1]], { icon: icon, pane: 'cwPane' })
+    .bindPopup(popup, { maxWidth:220 })
+    .bindTooltip(typeLabel + (atRisk ? ' — ⚠ at risk' : ''), {
+      sticky: false, direction: 'top', offset: [0, -14]
+    })
+    .addTo(cwLayer);
+});
+// crosswalks are OFF by default
+
+// ── RENDER MODES ─────────────────────────────────────────────────────────────
+function clearAll(){
+  Object.values(poleMarkersMap).forEach(function(arr){ arr.forEach(function(m){ m.remove(); }); });
+  Object.values(heatLayers).forEach(function(l){ map.removeLayer(l); });
+  Object.values(clusterGroups).forEach(function(g){ map.removeLayer(g); });
+  poleMarkersMap = {}; heatLayers = {}; clusterGroups = {};
+}
+
+function renderDots(){
+  ['failed','atrisk','healthy'].forEach(function(status){
+    poleMarkersMap[status] = [];
+    if(!activeLayers.has(status)) return;
+    POLES.forEach(function(p, idx){
+      if(p[2] !== status) return;
+      var r = status==='healthy' ? 2 : (status==='atrisk' ? 3 : 4);
+      var m = L.circleMarker([p[0],p[1]], {
+        radius:r, color:poleColor(p), fillColor:poleColor(p),
+        fillOpacity: status==='healthy' ? 0.45 : status==='atrisk' ? 0.65 : 0.80,
+        weight:0,
+      }).on('click', function(){ selectPole(idx); });
+      m.addTo(map);
+      poleMarkersMap[status].push(m);
+    });
+  });
+}
+
+function renderHeat(){
+  // Render healthy → atrisk → failed so failed renders on top
+  ['healthy','atrisk','failed'].forEach(function(status){
+    if(!activeLayers.has(status)) return;
+    var pts = [];
+    var gradient = status==='failed'
+      ? {0.2:'#330000', 0.5:'#aa0000', 1:'#ff3333'}
+      : status==='atrisk'
+        ? {0.2:'#2a1800', 0.5:'#884400', 1:'#ffaa00'}
+        : {0.2:'#001a0d', 0.5:'#005522', 1:'#33cc66'};
+    var intensity = status==='failed' ? 0.8 : status==='atrisk' ? 0.6 : 0.4;
+    POLES.forEach(function(p){
+      if(p[2]===status) pts.push([p[0],p[1],intensity]);
+    });
+    var hl = L.heatLayer(pts,{
+      radius:20, blur:28, maxZoom:17,
+      max:0.8, minOpacity:0.2,
+      gradient:gradient
+    });
+    hl.addTo(map);
+    heatLayers[status] = hl;
+  });
+}
+
+function renderCluster(){
+  ['failed','atrisk','healthy'].forEach(function(status){
+    if(!activeLayers.has(status)) return;
+    var color = status==='failed'?'#ff3a3a':status==='atrisk'?'#f5a300':'#22cc66';
+    var cg = L.markerClusterGroup({
+      maxClusterRadius:50,
+      iconCreateFunction: function(cluster){
+        var cnt = cluster.getChildCount();
+        return L.divIcon({
+          html:'<div style="background:rgba(14,21,32,.9);border:1.5px solid '+color+';border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-family:\'IBM Plex Mono\',monospace;font-size:10px;color:'+color+'">'+cnt+'</div>',
+          className:'', iconSize:[34,34],
+        });
+      },
+      spiderfyOnMaxZoom:true, showCoverageOnHover:false,
+    });
+    POLES.forEach(function(p, idx){
+      if(p[2] !== status) return;
+      var m = L.circleMarker([p[0],p[1]], {
+        radius:5, color:color, fillColor:color, fillOpacity:.88, weight:0,
+      }).on('click', function(){ selectPole(idx); });
+      cg.addLayer(m);
+    });
+    cg.addTo(map);
+    clusterGroups[status] = cg;
+  });
+}
+
+function redraw(){
+  clearAll();
+  if(viewMode==='dots')    renderDots();
+  else if(viewMode==='heat')    renderHeat();
+  else if(viewMode==='cluster') renderCluster();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+// setTimeout 0 pushes to next event loop tick — map container has dimensions by then
+setTimeout(function() { redraw(); }, 100);
+setTimeout(function() { if(Object.values(poleMarkersMap).every(function(a){return a.length===0;})) redraw(); }, 1000);
+
+// ── POLE DETAIL PANEL ─────────────────────────────────────────────────────────
+function selectPole(idx){
+  var p = POLES[idx];
+  // p: [lat,lon,status,color,fixture,lux_med,lux_max,lux_pct,passes,facility_id]
+  var status=p[2], color=poleColor(p), fixture=p[4], med=p[5], max=p[6], pct=p[7], passes=p[8], fid=p[9];
+
+  document.getElementById('pd-id').textContent = 'ID: ' + String(p[9]).replace(/\.0$/,'');
+  document.getElementById('pd-fixture').textContent = fixture;
+  document.getElementById('pd-status').textContent  = status.toUpperCase();
+  document.getElementById('pd-status').style.color  = color;
+  document.getElementById('pd-pct-label').textContent = pct + '% of expected';
+  document.getElementById('pd-pct-label').style.color = color;
+  document.getElementById('pd-bar').style.width = pct + '%';
+  document.getElementById('pd-bar').style.background = color;
+  document.getElementById('pd-lux-med').textContent = med + ' lux';
+  document.getElementById('pd-lux-max').textContent = max + ' lux';
+  document.getElementById('pd-passes').textContent  = passes;
+  document.getElementById('pd-coords').textContent  = p[0].toFixed(6) + ', ' + p[1].toFixed(6);
+
+  document.getElementById('pole-detail').style.display = 'block';
+  map.setView([p[0],p[1]], Math.max(map.getZoom(), 16), {animate:true});
+}
+function closeDetail(){ document.getElementById('pole-detail').style.display='none'; }
+
+// ── LAYER TOGGLES ─────────────────────────────────────────────────────────────
+function toggleLayer(status){
+  var btn = document.querySelector('.lb-'+status);
+  if(status === 'cw'){
+    var cwLegend = document.getElementById('cw-legend');
+    if(activeLayers.has('cw')){
+      activeLayers.delete('cw'); map.removeLayer(cwLayer);
+      btn.classList.remove('active');
+      if(cwLegend) cwLegend.style.display = 'none';
+    } else {
+      activeLayers.add('cw'); cwLayer.addTo(map);
+      btn.classList.add('active');
+      if(cwLegend) cwLegend.style.display = 'block';
+    }
+    return;
+  }
+  if(activeLayers.has(status)){ activeLayers.delete(status); btn.classList.remove('active'); }
+  else { activeLayers.add(status); btn.classList.add('active'); }
+  redraw();
+}
+
+// ── VIEW MODE ─────────────────────────────────────────────────────────────────
+function setView(mode){
+  viewMode = mode;
+  document.querySelectorAll('.vpill').forEach(function(b){ b.classList.remove('active'); });
+  document.getElementById('vp-'+mode).classList.add('active');
+  redraw();
+}
+
+// ── SIDEBAR INTERACTIONS ──────────────────────────────────────────────────────
+function toggleAcc(btn){
+  btn.classList.toggle('open');
+  var nowOpen = btn.classList.contains('open');  // state AFTER toggle
+  var body = btn.nextElementSibling;
+  var arrow = btn.querySelector('.acc-arr');
+  body.style.display = nowOpen ? 'block' : 'none';
+  if(arrow) arrow.textContent = nowOpen ? '◀' : '▼';
+
+  // Crosswalk accordion — sync map layer
+  if(btn.closest('.acc-section') && btn.textContent.includes('Crosswalk')){
+    if(nowOpen && activeLayers.has('cw')) cwLayer.addTo(map);
+    else map.removeLayer(cwLayer);
+  }
+}
+
+function filterRows(listId, fixture){
+  document.querySelectorAll('#'+listId+' .prow').forEach(function(r){
+    r.style.display = (!fixture || r.dataset.fixture===fixture) ? 'flex' : 'none';
+  });
+}
+function searchRows(listId, q){
+  q = q.toLowerCase();
+  document.querySelectorAll('#'+listId+' .prow').forEach(function(r){
+    r.style.display = r.textContent.toLowerCase().includes(q) ? 'flex' : 'none';
+  });
+}
+
+var activeFixture = null;
+
+function filterMapByFixture(fixture){
+  // Toggle: click same fixture again to reset
+  if(activeFixture === fixture){
+    activeFixture = null;
+    // Clear ALL row styling — nothing greyed out
+    document.querySelectorAll('.fx-row').forEach(function(r){
+      r.style.background  = '';
+      r.style.borderLeft  = '';
+      r.style.paddingLeft = '';
+      r.style.opacity     = '';
+    });
+    redraw();
+    showToast('Showing all fixtures');
+    return;
+  }
+  activeFixture = fixture;
+
+  // Highlight selected row, dim others
+  document.querySelectorAll('.fx-row').forEach(function(r){
+    var isSelected = r.getAttribute('data-fixture') === fixture;
+    r.style.background    = isSelected ? 'var(--surface2)' : '';
+    r.style.borderLeft    = isSelected ? '2px solid var(--text)' : '';
+    r.style.paddingLeft   = isSelected ? '6px' : '';
+    r.style.opacity       = isSelected ? '1' : '0.4';
+  });
+
+  // Redraw with fixture filter
+  clearAll();
+  if(viewMode !== 'dots') setView('dots');
+  ['failed','atrisk','healthy'].forEach(function(status){
+    poleMarkersMap[status] = [];
+    if(!activeLayers.has(status)) return;
+    POLES.forEach(function(p,idx){
+      if(p[2]!==status || p[4]!==fixture) return;
+      var r = status==='healthy'?2:status==='atrisk'?3:4;
+      var m = L.circleMarker([p[0],p[1]],{
+        radius:r,color:poleColor(p),fillColor:poleColor(p),
+        fillOpacity: status==='healthy'?0.45:status==='atrisk'?0.65:0.80,
+        weight:0,
+      }).on('click',function(){selectPole(idx);}).addTo(map);
+      poleMarkersMap[status].push(m);
+    });
+  });
+  showToast('Filtered to ' + fixture + ' — click again to reset');
+}
+
+// ── CROSSWALK LIST FILTER ────────────────────────────────────────────────────
+var cwListFilter = new Set(['atrisk','safe']);
+function filterCWList(type, btn){
+  if(cwListFilter.has(type)){ cwListFilter.delete(type); btn.classList.remove('active'); }
+  else { cwListFilter.add(type); btn.classList.add('active'); }
+  document.querySelectorAll('#cw-list .prow').forEach(function(r){
+    var isRisk = r.dataset.cwrisk === '1';
+    var show = (isRisk && cwListFilter.has('atrisk')) || (!isRisk && cwListFilter.has('safe'));
+    r.style.display = show ? 'flex' : 'none';
+  });
+}
+
+// ── EXPORT CSV ────────────────────────────────────────────────────────────────
+function exportCSV(){
+  var rows = ['Facility ID,Fixture,Status,Lux Median,Lux Max,Lux %,Survey Passes,Latitude,Longitude'];
+  POLES.forEach(function(p){
+    if(p[2]==='healthy') return;
+    rows.push([p[9],p[4],p[2],p[5],p[6],p[7]+'%',p[8],p[0],p[1]].join(','));
+  });
+  var blob = new Blob([rows.join('\n')], {type:'text/csv'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'sugarland_maintenance_list.csv';
+  a.click();
+  showToast('Exported ' + (rows.length-1) + ' poles to CSV');
+}
+
+// ── TOAST ─────────────────────────────────────────────────────────────────────
+function showToast(msg){
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2800);
+}
+
+// ── ZOOM-ADAPTIVE DOT SIZE ─────────────────────────────────────────────────────
+map.on('zoomend', function(){
+  if(viewMode!=='dots') return;
+  var z = map.getZoom();
+  var scale = z <= 13 ? 1 : z <= 15 ? 1.5 : 2.5;
+  ['failed','atrisk','healthy'].forEach(function(status){
+    var base = status==='healthy'?2:status==='atrisk'?4:5;
+    (poleMarkersMap[status]||[]).forEach(function(m){
+      m.setRadius(base * scale);
+    });
+  });
+});
+
+
+</script>
+</body>
+</html>
